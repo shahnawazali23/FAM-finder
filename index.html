@@ -59,31 +59,17 @@
 
   <script>
     // ===== Config =====
-    // This is the file the workflow generates:
     const DATA_URL = 'data/index.json';
 
-    // Demo data (used only if DATA_URL is missing)
-    const demoData = [
-      {
-        id: "DEMO-1",
-        title: "Demo Episode",
-        series: "Demo",
-        date: "2023-01-01",
-        url: "https://www.youtube.com/watch?v=XXXXXXXX",
-        lang: "ar",
-        topics: ["demo"],
-        terms: [
-          { term: "", t: 12, text: "مثال على نتيجة بحث عربية." },
-          { term: "", t: 45, text: "جملة أخرى لاختبار العرض." }
-        ]
-      }
-    ];
+    // Demo data (only if DATA_URL missing)
+    const demoData = [];
 
     // ===== State =====
     let videos = [];
     let fuse;
     let flatRows = [];
     let lastResults = [];
+    const titleCache = new Map(); // id -> resolved title
 
     // ===== Helpers =====
     const $ = (sel) => document.querySelector(sel);
@@ -115,6 +101,7 @@
 
     function updateStats(count){
       const q = $('#q').value.trim();
+      if (!q) { $('#stats').textContent = ''; return; }
       const topic = $('#topic').value;
       const parts = [];
       parts.push(`${count} result${count===1?'':'s'}`);
@@ -135,6 +122,25 @@
       URL.revokeObjectURL(a.href);
     }
 
+    // Resolve a YouTube title if missing (uses oEmbed)
+    async function resolveTitle(id, url){
+      if (titleCache.has(id)) return titleCache.get(id);
+      try{
+        const r = await fetch('https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent(url));
+        if (r.ok){
+          const data = await r.json();
+          const t = data?.title || '';
+          if (t) {
+            titleCache.set(id, t);
+            // Update any elements showing this title
+            document.querySelectorAll(`[data-vid="${id}"]`).forEach(el => el.textContent = t);
+            return t;
+          }
+        }
+      }catch(_){}
+      return '';
+    }
+
     // ===== UI Build =====
     function rebuildUI(){
       // Topics dropdown
@@ -151,7 +157,7 @@
         for(const trm of (v.terms||[])){
           flatRows.push({
             id: v.id,
-            title: v.title || v.id,
+            title: (v.title || '').trim(),
             series: v.series || '',
             date: v.date || '',
             url: v.url,
@@ -178,34 +184,41 @@
         ]
       });
 
-      // Initial search (from hash)
+      // Initial state: show nothing until user types
+      resultsEl.innerHTML = '';
+      $('#stats').textContent = '';
+
+      // Restore query from hash (optional)
       const params = new URLSearchParams(location.hash.slice(1));
       $('#q').value = params.get('q') || '';
       $('#topic').value = params.get('topic') || '';
-      runSearch();
+      if ($('#q').value.trim()) runSearch();
     }
 
     function runSearch(){
       const q = $('#q').value.trim();
       const topic = $('#topic').value;
 
-      // Persist query in URL hash
+      // sync URL hash
       const p = new URLSearchParams();
-      if(q) p.set('q', q);
-      if(topic) p.set('topic', topic);
+      if (q) p.set('q', q);
+      if (topic) p.set('topic', topic);
       history.replaceState(null, '', '#' + p.toString());
 
-      // Filter by topic first
-      let rows = flatRows;
-      if(topic) rows = rows.filter(r => r.topic === topic || (r.tags||[]).includes(topic));
-
-      // Search or list
-      let results = [];
-      if(q){
-        results = fuse.search(q).map(r => r.item).filter(r => !topic || r.topic === topic || (r.tags||[]).includes(topic));
-      } else {
-        results = rows.slice().sort((a,b) => (b.date||'').localeCompare(a.date||'') || a.t - b.t);
+      // if no query: clear UI and stop
+      if (!q) {
+        lastResults = [];
+        resultsEl.innerHTML = '';
+        $('#stats').textContent = '';
+        return;
       }
+
+      // filter + search
+      let rows = flatRows;
+      if (topic) rows = rows.filter(r => r.topic === topic || (r.tags||[]).includes(topic));
+
+      const results = fuse.search(q).map(r => r.item)
+        .filter(r => !topic || r.topic === topic || (r.tags||[]).includes(topic));
 
       lastResults = results;
       renderResultsGrouped(results, q);
@@ -221,13 +234,18 @@
       return m;
     }
 
-    function renderResultsGrouped(rows, q){
+    async function renderResultsGrouped(rows, q){
       const grouped = groupBy(rows, 'id');
       const cards = [];
-      for(const [id, items] of grouped){
+      const toResolve = []; // list of {id,url} missing titles
+
+      for (const [id, items] of grouped){
         items.sort((a,b)=>a.t-b.t);
         const v = items[0];
-        const title = v.title || id;
+        const knownTitle = (v.title || '').trim();
+        const showTitle = knownTitle || titleCache.get(id) || id; // fallback to id immediately
+        if (!knownTitle && !titleCache.has(id)) toResolve.push({id, url: v.url});
+
         const date  = v.date || '';
         const series= v.series || '';
         const topic = v.topic || '';
@@ -260,7 +278,7 @@
         cards.push(`
           <div class="result block rounded-xl border border-zinc-200 bg-white p-4 shadow-sm hover:shadow-md">
             <div class="flex items-center justify-between gap-3">
-              <div class="font-medium">${title}</div>
+              <div class="font-medium" data-vid="${id}">${showTitle}</div>
               <div class="text-xs text-zinc-500">${series} ${series && date ? '•' : ''} ${date}</div>
             </div>
             <div class="mt-1 flex flex-wrap items-center gap-2 text-sm">
@@ -275,6 +293,11 @@
 
       updateStats(rows.length);
       resultsEl.innerHTML = cards.join('') || `<div class="text-sm text-zinc-500">No matches. Try a different word (in the same language as the transcript).</div>`;
+
+      // Fetch & update missing titles in the background
+      for (const g of toResolve){
+        resolveTitle(g.id, g.url);
+      }
     }
 
     // ===== Events =====
@@ -301,6 +324,8 @@
 
     (async function init(){
       videos = await maybeLoadExternal();
+      // prefill titleCache with any known titles from JSON
+      videos.forEach(v => { if ((v.title||'').trim()) titleCache.set(v.id, v.title.trim()); });
       rebuildUI();
     })();
   </script>
