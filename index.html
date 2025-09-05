@@ -3,14 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Farhan al-Maliki — Video Finder</title>
+  <title>Farhan al‑Maliki — Video Finder</title>
   <!-- Tailwind via CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Fuse.js for fuzzy search -->
   <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2"></script>
+  <!-- Icon -->
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000000' d='M10 2a8 8 0 0 1 6.32 12.906l4.387 4.387a1 1 0 0 1-1.414 1.414l-4.387-4.387A8 8 0 1 1 10 2m0 2a6 6 0 1 0 0 12A6 6 0 0 0 10 4'/%3E%3C/svg%3E"/>
   <style>
-    .kbd{ padding:0.125rem 0.375rem; border:1px solid #d4d4d8; border-radius:0.25rem; font-size:0.75rem; font-family:monospace; }
+    .kbd{ @apply px-1.5 py-0.5 rounded border text-xs font-mono; }
     .result:hover { transform: translateY(-1px); }
     mark { background: transparent; box-shadow: inset 0 -0.5em 0 0 rgba(250, 204, 21, 0.6); }
   </style>
@@ -19,8 +20,8 @@
   <div class="max-w-6xl mx-auto p-4 sm:p-8">
     <header class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between mb-6">
       <div>
-        <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Farhan al-Maliki — Video Finder</h1>
-        <p class="text-sm text-zinc-600">Search across episodes, topics, and timestamped terms. Client-side only.</p>
+        <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Farhan al‑Maliki — Video Finder</h1>
+        <p class="text-sm text-zinc-600">Client‑side, fast fuzzy search across episodes, topics, and timestamped terms. Host on GitHub Pages. No backend.</p>
       </div>
       <div class="text-xs text-zinc-500">Shortcuts: <span class="kbd">/</span> focus • <span class="kbd">Esc</span> clear • <span class="kbd">↑/↓</span> navigate • <span class="kbd">Enter</span> open</div>
     </header>
@@ -28,7 +29,8 @@
     <!-- Controls -->
     <div class="grid gap-3 sm:grid-cols-12 items-start mb-4">
       <div class="sm:col-span-7">
-        <input id="q" type="search" placeholder="Search terms, topics, or quotes…" class="w-full rounded-xl border border-zinc-300 bg-white px-4 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+        <label class="sr-only" for="q">Search</label>
+        <input id="q" type="search" placeholder="Search terms, topics, or quotes (e.g., saqifah, isnad, hadith)…" class="w-full rounded-xl border border-zinc-300 bg-white px-4 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
       </div>
       <div class="sm:col-span-3">
         <select id="topic" class="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
@@ -37,89 +39,329 @@
       </div>
       <div class="sm:col-span-2 flex gap-2">
         <button id="clearBtn" class="flex-1 rounded-xl border border-zinc-300 px-3 py-2.5 bg-white shadow-sm hover:bg-zinc-50">Clear</button>
-        <button id="exportBtn" class="rounded-xl border border-zinc-300 px-3 py-2.5 bg-white shadow-sm hover:bg-zinc-50">CSV</button>
+        <button id="exportBtn" title="Export results to CSV" class="rounded-xl border border-zinc-300 px-3 py-2.5 bg-white shadow-sm hover:bg-zinc-50">CSV</button>
       </div>
     </div>
 
+    <!-- Stats -->
     <div id="stats" class="text-sm text-zinc-600 mb-2"></div>
+
+    <!-- Results -->
     <div id="results" class="grid gap-3"></div>
 
     <footer class="mt-10 text-xs text-zinc-500">
-      <p>Drop your data into <code>data/videos.json</code> (or later, we’ll generate it automatically). If absent, demo data is used.</p>
+      <p>Drop your data into <code>data/videos.json</code> and it will auto‑load. If absent, demo data (embedded) is used. Built with Fuse.js. Inspired by ippsec.rocks.</p>
     </footer>
   </div>
 
   <script>
-    // Demo data
+    // --- Data schema ---
+    // Each video has: id, title, series, date, url (YouTube or archive), lang, topics[], terms[]
+    // Each term has: term, t (seconds), text (quote/summary), tags[] (optional)
+
     const demoData = [
       {
         id: "HT-021",
         title: "Haqāʾiq al-Tārīkh — Episode 021",
-        series: "Haqāʾiq al-Tārīkh",
+        series: "Haqāʾiq al‑Tārīkh",
         date: "2023-11-02",
         url: "https://www.youtube.com/watch?v=XXXXXXXX",
         lang: "ar",
-        topics: ["Saqifah","Caliphate","Early Sources"],
+        topics: ["Saqifah", "Caliphate", "Early Sources"],
         terms: [
-          { term: "Saqifah", t: 732, text: "Narratives around the meeting at Saqifah and competing isnād clusters." },
-          { term: "Isnād", t: 945, text: "Comparing regional transmission lines in early reports." }
+          { term: "Saqifah", t: 732, text: "Narratives around the meeting at Saqifah and competing isnād clusters.", tags:["event","politics"] },
+          { term: "Isnād", t: 945, text: "Comparing regional transmission lines in early reports.", tags:["hadith","method"] },
+          { term: "Abū Mikhnaf", t: 1187, text: "Use and critique of Abū Mikhnaf's reports in Ṭabarī.", tags:["source","tabari"] }
+        ]
+      },
+      {
+        id: "IT-005",
+        title: "Ibn Taymiyya — Polemics and Sources",
+        series: "Topical Lectures",
+        date: "2022-06-18",
+        url: "https://www.youtube.com/watch?v=YYYYYYYY",
+        lang: "ar",
+        topics: ["Hadith Critique", "Ibn Taymiyya"],
+        terms: [
+          { term: "Jarḥ wa‑taʿdīl", t: 402, text: "Standards invoked in assessing narrators.", tags:["hadith"] },
+          { term: "Mursal", t: 870, text: "Discussion on mursal reports and legal weight.", tags:["usul","hadith"] }
         ]
       }
     ];
 
-    const DATA_URL = "data/index.json";
-    let videos = [];
-    let fuse; let flatRows = [];
+    // If you add a data/videos.json file in the same repo, we'll fetch that instead of demoData.
+    // Prefer a dynamic backend index if present (e.g., Cloudflare Worker or GitHub Action output)
+const API_INDEX_URL = '/api/index.json';
+const DATA_URL = 'data/videos.json';
 
-    const $ = sel => document.querySelector(sel);
+    // --- State ---
+    let videos = [];
+    let fuse; // Fuse instance for searching across videos + terms
+    let flatRows = []; // flattened rows for results
+    let activeIndex = -1;
+
+    // --- Helpers ---
+    const $ = (sel) => document.querySelector(sel);
     const resultsEl = $("#results");
 
     function fmtTime(sec){
-      sec = Math.floor(+sec||0);
-      const m = Math.floor(sec/60), s = sec%60;
-      return `${m}:${String(s).padStart(2,'0')}`;
+      sec = Math.max(0, Math.floor(+sec || 0));
+      const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+      return (h? h+":" : "") + String(m).padStart(2,'0') + ":" + String(s).padStart(2,'0');
     }
-    function ytAt(url, t){ return url + "&t=" + Math.floor(t); }
-    function highlight(text, q){ if(!q) return text; return text.replace(new RegExp("(" + q + ")", "ig"), "<mark>$1</mark>"); }
+
+    function ytAt(url, t){
+      try{
+        const u = new URL(url);
+        if(u.hostname.includes('youtube.com') || u.hostname.includes('youtu.be')){
+          if(u.searchParams){ u.searchParams.set('t', Math.floor(t)); return u.toString(); }
+        }
+      }catch(e){}
+      // fallback: append #t=
+      return url + (url.includes('#')? '&' : '#') + 't=' + Math.floor(t);
+    }
+
+    function highlight(text, query){
+      if(!query) return text;
+      const esc = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp('(' + esc + ')', 'ig');
+      return text.replace(re, '<mark>$1<\/mark>');
+    }
+
+    function updateStats(count){
+      const q = $('#q').value.trim();
+      const topic = $('#topic').value;
+      const parts = [];
+      parts.push(`${count} result${count===1?'':'s'}`);
+      if(q) parts.push(`for “${q}”`);
+      if(topic) parts.push(`in topic “${topic}”`);
+      $('#stats').textContent = parts.join(' ');
+    }
+
+    function downloadCSV(rows){
+      const headers = ['episode_id','title','series','date','topic','term','timestamp','quote','url'];
+      const escape = (v) => '"' + String(v ?? '').replace(/"/g,'""') + '"';
+      const csv = [headers.join(',')].concat(rows.map(r => [r.id, r.title, r.series, r.date, r.topic, r.term, fmtTime(r.t), r.text, ytAt(r.url, r.t)].map(escape).join(','))).join('\n');
+      const blob = new Blob([csv], {type:'text/csv'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'results.csv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
 
     function rebuildUI(){
+      // Build topic dropdown
+      const topics = new Set();
+      videos.forEach(v => (v.topics||[]).forEach(t => topics.add(t)));
+      const topicSel = $('#topic');
+      const current = topicSel.value;
+      topicSel.innerHTML = '<option value="">All topics<\/option>' + Array.from(topics).sort().map(t => `<option>${t}<\/option>`).join('');
+      if(Array.from(topics).includes(current)) topicSel.value = current;
+
+      // Flatten rows for search + display
       flatRows = [];
-      videos.forEach(v => (v.terms||[]).forEach(trm => flatRows.push({...v,...trm})));
-      fuse = new Fuse(flatRows, { includeMatches:true, threshold:0.35, keys:["term","text","title","series","topics"] });
+      for(const v of videos){
+        for(const trm of (v.terms||[])){
+          flatRows.push({
+            id: v.id, title: v.title, series: v.series, date: v.date, url: v.url, lang: v.lang,
+            topic: (v.topics||[])[0] || '',
+            term: trm.term, t: trm.t, text: trm.text || '', tags: trm.tags || []
+          });
+        }
+      }
+
+      // Init Fuse
+      fuse = new Fuse(flatRows, {
+        includeMatches: true,
+        threshold: 0.35,
+        ignoreLocation: true,
+        keys: [
+          {name:'term', weight: 0.6},
+          {name:'text', weight: 0.3},
+          {name:'title', weight: 0.15},
+          {name:'series', weight: 0.1},
+          {name:'topic', weight: 0.2}
+        ]
+      });
+
+      // Perform initial search from hash
+      const params = new URLSearchParams(location.hash.slice(1));
+      $('#q').value = params.get('q') || '';
+      $('#topic').value = params.get('topic') || '';
       runSearch();
     }
 
     function runSearch(){
-      const q = $("#q").value.trim();
-      let rows = q ? fuse.search(q).map(r => r.item) : flatRows;
-      renderResults(rows, q);
+      const q = $('#q').value.trim();
+      const topic = $('#topic').value;
+
+      const p = new URLSearchParams();
+      if(q) p.set('q', q);
+      if(topic) p.set('topic', topic);
+      history.replaceState(null, '', '#' + p.toString());
+
+      let rows = flatRows;
+      if(topic) rows = rows.filter(r => r.topic === topic || (r.tags||[]).includes(topic));
+
+      let results = [];
+      if(q){
+        results = fuse.search(q).map(r => r.item).filter(r => !topic || r.topic === topic || (r.tags||[]).includes(topic));
+      } else {
+        results = rows.slice().sort((a,b) => (b.date||'').localeCompare(a.date||'') || a.t - b.t);
+      }
+
+      renderResultsGrouped(results, q);
     }
 
-    function renderResults(rows,q){
-      $("#stats").textContent = `${rows.length} results`;
-      resultsEl.innerHTML = rows.map(r => `
-        <a href="${ytAt(r.url,r.t)}" target="_blank" class="result block rounded-xl border border-zinc-200 bg-white p-4 shadow-sm hover:shadow-md">
-          <div class="flex justify-between text-sm">
-            <span class="font-medium">${r.title}</span>
-            <span class="text-zinc-500">${r.date}</span>
-          </div>
-          <div class="mt-1 text-sm">
-            <span class="bg-amber-100 px-2 py-0.5 rounded">${highlight(r.term,q)}</span>
-            <span class="bg-zinc-100 px-2 py-0.5 rounded">${fmtTime(r.t)}</span>
-          </div>
-          <p class="mt-2 text-sm text-zinc-700">${highlight(r.text,q)}</p>
-        </a>
-      `).join("");
+    function groupBy(arr, key){
+      const m = new Map();
+      for(const x of arr){
+        const k = x[key];
+        if(!m.has(k)) m.set(k, []);
+        m.get(k).push(x);
+      }
+      return m;
     }
 
-    $("#q").addEventListener("input", runSearch);
-    $("#clearBtn").addEventListener("click", () => { $("#q").value=""; runSearch(); });
+    function renderResultsGrouped(rows, q){
+      // Group hits by video id so one card shows all timestamps inside that video
+      const grouped = groupBy(rows, 'id');
+      const cards = [];
+      for(const [id, items] of grouped){
+        // Sort by timestamp ascending
+        items.sort((a,b)=>a.t-b.t);
+        const v = items[0];
+        const title = v.title || id;
+        const date  = v.date || '';
+        const series= v.series || '';
+        const topic = v.topic || '';
+        const count = items.length;
+        const snippets = items.slice(0, 10).map(it => {
+          const jump = ytAt(it.url, it.t);
+          const text = highlight(it.text || it.term || '', q);
+          return `<li class='flex items-start gap-2'><a class='shrink-0 rounded-lg bg-zinc-100 px-2 py-0.5 text-sm' href='${jump}' target='_blank' rel='noopener'>${fmtTime(it.t)}</a><span class='text-sm text-zinc-700'>${text}</span></li>`;
+        }).join('');
+
+        const extraCount = Math.max(0, items.length - 10);
+        const extraList = extraCount > 0 ? `
+          <details class='mt-2'>
+            <summary class='cursor-pointer text-sm text-amber-700 hover:underline'>Show ${extraCount} more timestamps</summary>
+            <ul class='mt-2 grid gap-2'>
+              ${items.slice(10).map(it => {
+                const jump = ytAt(it.url, it.t);
+                return `<li class='flex items-start gap-2'><a class='shrink-0 rounded-lg bg-zinc-100 px-2 py-0.5 text-sm' href='${jump}' target='_blank' rel='noopener'>${fmtTime(it.t)}</a><span class='text-sm text-zinc-700'>${highlight(it.text||it.term||'', q)}</span></li>`;
+              }).join('')}
+            </ul>
+          </details>
+        ` : '';
+
+        cards.push(`
+          <div class='result block rounded-xl border border-zinc-200 bg-white p-4 shadow-sm hover:shadow-md'>
+            <div class='flex items-center justify-between gap-3'>
+              <div class='font-medium'>${title}</div>
+              <div class='text-xs text-zinc-500'>${series} ${series && date ? '•' : ''} ${date}</div>
+            </div>
+            <div class='mt-1 flex flex-wrap items-center gap-2 text-sm'>
+              ${topic ? `<span class='rounded-lg bg-zinc-100 px-2 py-0.5'>${topic}</span>` : ''}
+              <span class='rounded-lg bg-amber-100 px-2 py-0.5'>${count} hit${count===1?'':'s'}</span>
+            </div>
+            <ul class='mt-3 grid gap-2'>${snippets}</ul>
+            ${extraList}
+          </div>
+        `);
+      }
+
+      const totalHits = rows.length;
+      updateStats(totalHits);
+      resultsEl.innerHTML = cards.join('');
+    }
+
+    function renderResults(rows, q){ /* unused after grouping; kept for fallback */(rows, q){
+      updateStats(rows.length);
+      activeIndex = -1;
+      resultsEl.innerHTML = rows.map((r,i) => {
+        const jump = ytAt(r.url, r.t);
+        const term = highlight(r.term, q);
+        const text = highlight(r.text, q);
+        return `
+          <a href="${jump}" target="_blank" rel="noopener" data-idx="${i}" class="result block rounded-xl border border-zinc-200 bg-white p-4 shadow-sm hover:shadow-md focus:ring-2 focus:ring-amber-400 outline-none">
+            <div class="flex items-center justify-between gap-3">
+              <div class="font-medium">${r.title}</div>
+              <div class="text-xs text-zinc-500">${r.series || ''} • ${r.date || ''}</div>
+            </div>
+            <div class="mt-1 flex flex-wrap items-center gap-2 text-sm">
+              <span class="rounded-lg bg-amber-100 px-2 py-0.5">${term}</span>
+              <span class="rounded-lg bg-zinc-100 px-2 py-0.5">${fmtTime(r.t)}</span>
+              ${r.topic ? `<span class='rounded-lg bg-zinc-100 px-2 py-0.5'>${r.topic}<\/span>` : ''}
+              ${(r.tags||[]).slice(0,4).map(t=>`<span class='rounded-lg bg-zinc-100 px-2 py-0.5'>${t}<\/span>`).join('')}
+            </div>
+            ${r.text ? `<p class="mt-2 text-sm text-zinc-700">${text}<\/p>` : ''}
+          <\/a>`;
+      }).join('');
+    }
+
+    // --- Events ---
+    document.addEventListener('keydown', (e) => {
+      if(e.key === '/' && document.activeElement !== $('#q')){ e.preventDefault(); $('#q').focus(); $('#q').select(); }
+      if(e.key === 'Escape'){ $('#q').value=''; runSearch(); }
+      if(['ArrowDown','ArrowUp'].includes(e.key)){
+        const links = Array.from(resultsEl.querySelectorAll('a.result'));
+        if(!links.length) return;
+        e.preventDefault();
+        activeIndex = (activeIndex + (e.key==='ArrowDown'?1:-1) + links.length) % links.length;
+        links.forEach(l => l.classList.remove('ring-2','ring-amber-400'));
+        links[activeIndex].classList.add('ring-2','ring-amber-400');
+        links[activeIndex].scrollIntoView({block:'nearest'});
+      }
+      if(e.key === 'Enter' && activeIndex >= 0){
+        const link = resultsEl.querySelector(`a.result[data-idx='${activeIndex}']`);
+        if(link){ link.click(); }
+      }
+    });
+
+    $('#q').addEventListener('input', runSearch);
+    $('#topic').addEventListener('change', runSearch);
+    $('#clearBtn').addEventListener('click', () => { $('#q').value=''; $('#topic').value=''; runSearch(); $('#q').focus(); });
+    $('#exportBtn').addEventListener('click', () => {
+      const q = $('#q').value.trim();
+      const topic = $('#topic').value;
+      // re-run to get current rows from DOM
+      const links = Array.from(resultsEl.querySelectorAll('a.result'));
+      const rows = links.map(a => {
+        const i = +a.getAttribute('data-idx');
+        return (q? (fuse.search(q).map(r=>r.item)) : flatRows)[i];
+      }).filter(Boolean);
+      downloadCSV(rows);
+    });
+
+    async function maybeLoadExternal(){
+      // 1) Try dynamic API index first (serverless/worker)
+      try{
+        const r1 = await fetch(API_INDEX_URL, {cache:'no-store'});
+        if(r1.ok){
+          const data = await r1.json();
+          if(Array.isArray(data) && data.length){
+            return data;
+          }
+        }
+      }catch(_){}
+      // 2) Then try static data/videos.json if present
+      try{
+        const r2 = await fetch(DATA_URL, {cache:'no-store'});
+        if(r2.ok){
+          const data2 = await r2.json();
+          if(Array.isArray(data2) && data2.length){
+            return data2;
+          }
+        }
+      }catch(_){}
+      // 3) Fallback to embedded demo data
+      return demoData;
+    }
 
     (async function init(){
-      try{
-        const resp = await fetch(DATA_URL,{cache:"no-store"});
-        videos = resp.ok ? await resp.json() : demoData;
-      }catch{ videos = demoData; }
+      videos = await maybeLoadExternal();
       rebuildUI();
     })();
   </script>
