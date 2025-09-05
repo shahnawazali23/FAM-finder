@@ -21,7 +21,7 @@
 </head>
 <body class="bg-zinc-50 text-zinc-900">
   <div class="max-w-6xl mx-auto p-4 sm:p-8">
-    <header class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between mb-6">
+    <header class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between mb-4 sm:mb-6">
       <div>
         <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">Farhan al-Maliki — Video Finder</h1>
         <p class="text-sm text-zinc-600">Client-side search across episodes and timestamped quotes. Hosted on GitHub Pages.</p>
@@ -30,10 +30,13 @@
     </header>
 
     <!-- Controls -->
-    <div class="grid gap-3 sm:grid-cols-12 items-start mb-4">
+    <div class="grid gap-3 sm:grid-cols-12 items-start">
       <div class="sm:col-span-7">
         <label class="sr-only" for="q">Search</label>
         <input id="q" type="search" placeholder="ابحث هنا … (اكتب كلمة موجودة في الترجمة)" class="w-full rounded-xl border border-zinc-300 bg-white px-4 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+        <p class="text-xs text-zinc-500 mt-1">
+          Tips: <code>"عبارة تامة"</code> • <code>+مطلوب</code> • <code>-مستبعد</code> • <code>topic:سقيفة</code> • <code>title:المالكي</code>
+        </p>
       </div>
       <div class="sm:col-span-3">
         <select id="topic" class="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
@@ -47,13 +50,13 @@
     </div>
 
     <!-- Stats -->
-    <div id="stats" class="text-sm text-zinc-600 mb-2"></div>
+    <div id="stats" class="text-sm text-zinc-600 my-3"></div>
 
     <!-- Results -->
     <div id="results" class="grid gap-3"></div>
 
     <footer class="mt-10 text-xs text-zinc-500">
-      <p>Data source: <code>data/index.json</code>. If absent, demo data (embedded) is used. Built with Fuse.js. Inspired by ippsec.rocks.</p>
+      <p>Data source: <code>data/index.json</code>. Built with Fuse.js. Inspired by ippsec.rocks.</p>
     </footer>
   </div>
 
@@ -61,7 +64,7 @@
     // ===== Config =====
     const DATA_URL = 'data/index.json';
 
-    // Demo data (only if DATA_URL missing)
+    // Fallback if DATA_URL missing (keep empty)
     const demoData = [];
 
     // ===== State =====
@@ -99,6 +102,59 @@
       return String(text).replace(re, '<mark>$1</mark>');
     }
 
+    // Normalize Arabic text (remove tashkīl, normalize alif/ya/ta marbuta, etc.)
+    function normalizeArabic(s){
+      if(!s) return '';
+      return s.toLowerCase()
+        .replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]/g,'') // diacritics
+        .replace(/[أإآ]/g,'ا')
+        .replace(/ى/g,'ي')
+        .replace(/ة/g,'ه')
+        .replace(/[ؤئ]/g,'ء')
+        .replace(/ـ/g,'') // tatweel
+        .replace(/[^\p{L}\p{N}\s]/gu,' ')
+        .replace(/\s+/g,' ')
+        .trim();
+    }
+
+    // Parse query tokens: "phrase", +must, -not, topic:, title:
+    function parseQuery(q){
+      const tokens = (q.match(/"[^"]+"|\S+/g) || []);
+      const out = { phrases:[], must:[], mustNot:[], topic:null, title:null, raw:q };
+      for(const t of tokens){
+        if(t.startsWith('topic:')) out.topic = normalizeArabic(t.slice(6));
+        else if(t.startsWith('title:')) out.title = normalizeArabic(t.slice(6));
+        else if(t.startsWith('+')) out.must.push(normalizeArabic(t.slice(1)));
+        else if(t.startsWith('-')) out.mustNot.push(normalizeArabic(t.slice(1)));
+        else if(t.startsWith('"') && t.endsWith('"')) out.phrases.push(normalizeArabic(t.slice(1,-1)));
+        else out.must.push(normalizeArabic(t));
+      }
+      return out;
+    }
+
+    // Advanced row matching (after fuzzy prefilter)
+    function matchesAdvanced(row, parsed){
+      // topic: filter in query
+      const topicOK = !parsed.topic ||
+        normalizeArabic(row.topic) === parsed.topic ||
+        (row.tags||[]).map(normalizeArabic).includes(parsed.topic);
+      if(!topicOK) return false;
+
+      // title: filter
+      if(parsed.title && !row.titleNorm.includes(parsed.title)) return false;
+
+      // require all MUST words
+      for(const w of parsed.must){ if(w && !row.searchBlob.includes(w)) return false; }
+
+      // require each phrase exactly in transcript text
+      for(const ph of parsed.phrases){ if(ph && !row.textNorm.includes(ph)) return false; }
+
+      // exclude (-word)
+      for(const x of parsed.mustNot){ if(x && row.searchBlob.includes(x)) return false; }
+
+      return true;
+    }
+
     function updateStats(count){
       const q = $('#q').value.trim();
       if (!q) { $('#stats').textContent = ''; return; }
@@ -122,7 +178,7 @@
       URL.revokeObjectURL(a.href);
     }
 
-    // Resolve a YouTube title if missing (uses oEmbed)
+    // Resolve real YouTube title (oEmbed) if JSON title is missing
     async function resolveTitle(id, url){
       if (titleCache.has(id)) return titleCache.get(id);
       try{
@@ -132,7 +188,6 @@
           const t = data?.title || '';
           if (t) {
             titleCache.set(id, t);
-            // Update any elements showing this title
             document.querySelectorAll(`[data-vid="${id}"]`).forEach(el => el.textContent = t);
             return t;
           }
@@ -141,7 +196,7 @@
       return '';
     }
 
-    // ===== UI Build =====
+    // ===== Build UI / Data =====
     function rebuildUI(){
       // Topics dropdown
       const topics = new Set();
@@ -151,44 +206,54 @@
       topicSel.innerHTML = '<option value="">All topics</option>' + Array.from(topics).sort().map(t => `<option>${t}</option>`).join('');
       if(Array.from(topics).includes(current)) topicSel.value = current;
 
-      // Flatten transcript rows
+      // Flatten rows & create normalized fields
       flatRows = [];
       for(const v of videos){
+        const title = (v.title || v.id || '').trim();
+        const titleNorm = normalizeArabic(title);
+        const topic0 = (v.topics||[])[0] || '';
         for(const trm of (v.terms||[])){
-          flatRows.push({
+          const text = trm.text || '';
+          const term = trm.term || '';
+          const row = {
             id: v.id,
-            title: (v.title || '').trim(),
+            title,
+            titleNorm,
             series: v.series || '',
             date: v.date || '',
             url: v.url,
             lang: v.lang || '',
-            topic: (v.topics||[])[0] || '',
-            term: trm.term || '',
+            topic: topic0,
+            term,
             t: trm.t,
-            text: trm.text || '',
+            text,
             tags: trm.tags || []
-          });
+          };
+          row.textNorm  = normalizeArabic(text);
+          row.termNorm  = normalizeArabic(term);
+          row.topicNorm = normalizeArabic(topic0);
+          row.searchBlob = [row.textNorm, row.termNorm, row.titleNorm].join(' ');
+          flatRows.push(row);
         }
       }
 
-      // Fuse index
+      // Fuse index over normalized fields
       fuse = new Fuse(flatRows, {
         includeMatches: false,
         threshold: 0.35,
         ignoreLocation: true,
         keys: [
-          {name:'text',  weight: 0.6},
-          {name:'term',  weight: 0.3},
-          {name:'title', weight: 0.15},
-          {name:'topic', weight: 0.2}
+          {name:'textNorm',  weight: 0.7},
+          {name:'termNorm',  weight: 0.4},
+          {name:'titleNorm', weight: 0.2}
         ]
       });
 
-      // Initial state: show nothing until user types
+      // Initial state: show nothing until a query exists
       resultsEl.innerHTML = '';
       $('#stats').textContent = '';
 
-      // Restore query from hash (optional)
+      // If URL already has a query, run it
       const params = new URLSearchParams(location.hash.slice(1));
       $('#q').value = params.get('q') || '';
       $('#topic').value = params.get('topic') || '';
@@ -196,54 +261,55 @@
     }
 
     function runSearch(){
-      const q = $('#q').value.trim();
-      const topic = $('#topic').value;
+      const qRaw = $('#q').value.trim();
+      const parsed = parseQuery(qRaw);
 
       // sync URL hash
       const p = new URLSearchParams();
-      if (q) p.set('q', q);
-      if (topic) p.set('topic', topic);
+      if(qRaw) p.set('q', qRaw);
+      if(parsed.topic) p.set('topic', parsed.topic);
       history.replaceState(null, '', '#' + p.toString());
 
-      // if no query: clear UI and stop
-      if (!q) {
+      // show nothing until user types
+      if (!qRaw){
         lastResults = [];
         resultsEl.innerHTML = '';
         $('#stats').textContent = '';
         return;
       }
 
-      // filter + search
+      // UI topic dropdown filter first
+      const topicSel = $('#topic').value;
       let rows = flatRows;
-      if (topic) rows = rows.filter(r => r.topic === topic || (r.tags||[]).includes(topic));
+      if(topicSel) rows = rows.filter(r => r.topic === topicSel || (r.tags||[]).includes(topicSel));
 
-      const results = fuse.search(q).map(r => r.item)
-        .filter(r => !topic || r.topic === topic || (r.tags||[]).includes(topic));
+      // fuzzy prefilter using MUST words; if none, start from all rows
+      const mustQ = parsed.must.join(' ').trim();
+      let results = mustQ ? fuse.search(mustQ).map(r => r.item) : rows.slice();
+
+      // apply advanced filters (phrases, -not, title:, topic:)
+      results = results.filter(r => matchesAdvanced(r, parsed));
 
       lastResults = results;
-      renderResultsGrouped(results, q);
-    }
-
-    function groupBy(arr, key){
-      const m = new Map();
-      for(const x of arr){
-        const k = x[key];
-        if(!m.has(k)) m.set(k, []);
-        m.get(k).push(x);
-      }
-      return m;
+      renderResultsGrouped(results, qRaw);
     }
 
     async function renderResultsGrouped(rows, q){
-      const grouped = groupBy(rows, 'id');
+      const grouped = new Map();
+      for(const r of rows){
+        if(!grouped.has(r.id)) grouped.set(r.id, []);
+        grouped.get(r.id).push(r);
+      }
+
       const cards = [];
-      const toResolve = []; // list of {id,url} missing titles
+      const toResolve = [];
 
       for (const [id, items] of grouped){
         items.sort((a,b)=>a.t-b.t);
         const v = items[0];
+
         const knownTitle = (v.title || '').trim();
-        const showTitle = knownTitle || titleCache.get(id) || id; // fallback to id immediately
+        const showTitle = knownTitle || titleCache.get(id) || id;
         if (!knownTitle && !titleCache.has(id)) toResolve.push({id, url: v.url});
 
         const date  = v.date || '';
@@ -294,10 +360,8 @@
       updateStats(rows.length);
       resultsEl.innerHTML = cards.join('') || `<div class="text-sm text-zinc-500">No matches. Try a different word (in the same language as the transcript).</div>`;
 
-      // Fetch & update missing titles in the background
-      for (const g of toResolve){
-        resolveTitle(g.id, g.url);
-      }
+      // resolve missing titles in background
+      for (const g of toResolve){ resolveTitle(g.id, g.url); }
     }
 
     // ===== Events =====
@@ -324,7 +388,7 @@
 
     (async function init(){
       videos = await maybeLoadExternal();
-      // prefill titleCache with any known titles from JSON
+      // cache any titles provided by JSON
       videos.forEach(v => { if ((v.title||'').trim()) titleCache.set(v.id, v.title.trim()); });
       rebuildUI();
     })();
