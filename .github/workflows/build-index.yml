@@ -21,6 +21,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install youtube-transcript-api google-api-python-client
 
+      - name: Show videos_manual.json (debug)
+        run: |
+          echo "---- data/videos_manual.json ----"
+          test -f data/videos_manual.json && cat data/videos_manual.json || echo "MISSING: data/videos_manual.json"
+
+
       - name: Build index
         env:
           YT_API_KEY: ${{ secrets.YT_API_KEY }}
